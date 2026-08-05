@@ -1,0 +1,12 @@
+name: Enviar atualizacao
+
+on:
+  push:
+    branches: ['main']
+
+jobs:
+  send_updates:
+    name: Enviar atualizacao para producao
+    type: update
+    params:
+      channel: production

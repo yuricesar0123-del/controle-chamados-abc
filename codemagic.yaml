@@ -1,0 +1,63 @@
+workflows:
+  ios-sidestore:
+    name: iOS IPA para SideStore
+    instance_type: mac_mini_m2
+    max_build_duration: 60
+    scripts:
+      - name: Instalar dependencias JavaScript
+        script: npm ci
+
+      - name: Gerar projeto nativo iOS no macOS
+        script: npx expo prebuild --platform ios --clean
+
+      - name: Instalar dependencias iOS
+        script: |
+          cd ios
+          pod install
+
+      - name: Compilar IPA sem assinatura para o SideStore
+        script: |
+          set -e
+          BUILD_DIR="$CM_BUILD_DIR/build"
+          ARCHIVE_PATH="$BUILD_DIR/ControleChamadosABC.xcarchive"
+          mkdir -p "$BUILD_DIR"
+
+          WORKSPACE="$(find "$CM_BUILD_DIR/ios" -maxdepth 1 -name '*.xcworkspace' -print -quit)"
+          if [ -z "$WORKSPACE" ]; then
+            echo "Workspace iOS nao encontrado"
+            exit 1
+          fi
+
+          SCHEME="$(xcodebuild -list -workspace "$WORKSPACE" | awk '/Schemes:/{found=1; next} found && NF {print $1; exit}')"
+          if [ -z "$SCHEME" ]; then
+            echo "Scheme iOS nao encontrado"
+            exit 1
+          fi
+
+          xcodebuild \
+            -workspace "$WORKSPACE" \
+            -scheme "$SCHEME" \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -archivePath "$ARCHIVE_PATH" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            archive
+
+          APP_PATH="$(find "$ARCHIVE_PATH/Products/Applications" -maxdepth 1 -name '*.app' -print -quit)"
+          if [ -z "$APP_PATH" ]; then
+            echo "Aplicativo compilado nao encontrado no archive"
+            exit 1
+          fi
+
+          mkdir -p "$BUILD_DIR/Payload"
+          cp -R "$APP_PATH" "$BUILD_DIR/Payload/"
+          (
+            cd "$BUILD_DIR"
+            /usr/bin/zip -qry ControleChamadosABC-unsigned.ipa Payload
+          )
+
+    artifacts:
+      - build/*.ipa
+      - /tmp/xcodebuild_logs/*.log

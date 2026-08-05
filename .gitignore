@@ -1,0 +1,8 @@
+node_modules/
+.expo/
+dist/
+expo-server.log
+*.ipa
+ios/
+android/.gradle/
+android/app/build/
