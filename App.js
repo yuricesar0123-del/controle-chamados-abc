@@ -1,13 +1,12 @@
 import React, { useState, useRef, useEffect } from 'react';
 import {
   StyleSheet, Text, View, TextInput, TouchableOpacity, ScrollView,
-  Alert, Image, Modal, StatusBar, Keyboard, LogBox, Platform, KeyboardAvoidingView, Switch, FlatList
+  Alert, Image, Modal, StatusBar, Keyboard, Platform, KeyboardAvoidingView, Switch, FlatList
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
-import * as DocumentPicker from 'expo-document-picker';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as SecureStore from 'expo-secure-store';
 import * as Application from 'expo-application';
@@ -17,48 +16,19 @@ import * as FileSystem from 'expo-file-system/legacy';
 import { useFonts, Poppins_400Regular, Poppins_600SemiBold, Poppins_700Bold } from '@expo-google-fonts/poppins';
 import { Ionicons } from '@expo/vector-icons';
 import * as ScreenOrientation from 'expo-screen-orientation';
+import {
+  EMPRESA_NOME,
+  EQUIPAMENTOS_MANUTENCAO,
+  LOJAS_PADRAO,
+  SOLICITANTES_PADRAO,
+  SETORES_PADRAO
+} from './src/constants/catalogs';
+import SelectionModal from './src/components/SelectionModal';
+import EquipmentSelectionModal from './src/components/EquipmentSelectionModal';
+import { exportBackupFile, importBackupFile } from './src/services/backupService';
+import { isActivationCodeValid } from './src/security/activation';
 
-const EMPRESA_NOME = "CONTROLE DE CHAMADOS ABC";
 const LOGO_SOURCE = require('./assets/logo.png');
-
-const EQUIPAMENTOS_MANUTENCAO = {
-  'PDV e atendimento': [
-    'Computador (CPU/Mini PC)',
-    'Monitor do Operador',
-    'Teclado PDV Programável',
-    'Mouse Óptico',
-    'Display de Cliente (Torre eletrônica)',
-    'Leitor de Código de Barras Fixo (Mesa)',
-    'Leitor de Código de Barras Manual (Mão)',
-    'Leitor de Código de Barras Omnidirecional',
-    'Leitor de QRCode / Câmera Biométrica',
-    'Impressora Térmica Não Fiscal (Cupom)',
-    'Pin Pad (Terminal TEF Integrado)',
-    'Módulo Fiscal Blindado (SAT ou MFE)',
-    'Gaveta de Dinheiro com Abertura Elétrica'
-  ],
-  'Rede e energia': [
-    'Nobreak (UPS)',
-    'Estabilizador de Tensão Profissional',
-    'Filtro de Linha',
-    'Switch de Rede Giga',
-    'Roteador Wi-Fi Corporativo',
-    'Cabo de Rede RJ45 Categoria 6',
-    'Modem 4G/5G de Contingência (Internet reserva)'
-  ],
-  'Operação e infraestrutura': [
-    'Coletor de Dados Portátil (Android/Windows Mobile)',
-    'Terminal de Consulta (Totem Busca-Preço)',
-    'Balança Comercial Inteligente com Wi-Fi/Rede',
-    'Servidor Local de Banco de Dados do PDV'
-  ],
-  'Segurança': [
-    'Câmera de Monitoramento CFTV IP (Focada na gaveta)',
-    'Gravador de Vídeo Digital (DVR/NVR)'
-  ]
-};
-
-LogBox.ignoreAllLogs();
 
 export default function App() {
   let [fontsLoaded] = useFonts({
@@ -78,6 +48,11 @@ export default function App() {
 
   const [client, setClient] = useState('');
   const [unit, setUnit] = useState('');
+  const [sector, setSector] = useState('');
+  const [isOtherRequester, setIsOtherRequester] = useState(false);
+  const [unitModalVisible, setUnitModalVisible] = useState(false);
+  const [requesterModalVisible, setRequesterModalVisible] = useState(false);
+  const [sectorModalVisible, setSectorModalVisible] = useState(false);
   const [respName, setRespName] = useState('');
   const [tempService, setTempService] = useState('');
   const [servicesList, setServicesList] = useState([]);
@@ -85,7 +60,6 @@ export default function App() {
   const [usedMaterialsList, setUsedMaterialsList] = useState([]);
   const [selectedEquipment, setSelectedEquipment] = useState([]);
   const [equipmentModalVisible, setEquipmentModalVisible] = useState(false);
-  const [equipmentSearch, setEquipmentSearch] = useState('');
   const [photos, setPhotos] = useState([]);
 
   const [checklist, setChecklist] = useState({
@@ -112,6 +86,7 @@ export default function App() {
   const [reopenCpf, setReopenCpf] = useState('');
 
   const [clientsDb, setClientsDb] = useState([]);
+  const [clientSearch, setClientSearch] = useState('');
   const [clientModalVisible, setClientModalVisible] = useState(false);
   const [newClientName, setNewClientName] = useState('');
   const [newClientUnit, setNewClientUnit] = useState('');
@@ -184,16 +159,21 @@ export default function App() {
   };
 
   const handleUnlock = async () => {
-    if (unlockCode === '159753ABC') {
-      await SecureStore.setItemAsync('abc_app_unlocked', 'true');
-      setTrialDaysLeft(-1);
-      setActivationModalVisible(false);
-      Alert.alert("Sucesso", "Licença ativada permanentemente!");
-      if (screen === 'expired') {
-        initializeApp();
+    try {
+      if (await isActivationCodeValid(unlockCode)) {
+        await SecureStore.setItemAsync('abc_app_unlocked', 'true');
+        setTrialDaysLeft(-1);
+        setUnlockCode('');
+        setActivationModalVisible(false);
+        Alert.alert("Sucesso", "Licença ativada permanentemente!");
+        if (screen === 'expired') {
+          initializeApp();
+        }
+      } else {
+        Alert.alert("Acesso Negado", "Chave de ativação inválida.");
       }
-    } else {
-      Alert.alert("Acesso Negado", "Chave de ativação inválida.");
+    } catch (error) {
+      Alert.alert("Erro", "Não foi possível validar a chave de ativação.");
     }
   };
 
@@ -209,8 +189,12 @@ export default function App() {
       if (trashStr) setOsTrash(JSON.parse(trashStr));
       else setOsTrash([]);
 
-      if (clientsStr) setClientsDb(JSON.parse(clientsStr));
-      else setClientsDb([]);
+      const savedClients = clientsStr ? JSON.parse(clientsStr) : [];
+      const requesterClients = savedClients.filter(item => !String(item.id || '').startsWith('loja-padrao-'));
+      setClientsDb(requesterClients);
+      if (requesterClients.length !== savedClients.length) {
+        await AsyncStorage.setItem('@abc_requesters_db', JSON.stringify(requesterClients));
+      }
     } catch (e) { }
   };
 
@@ -275,16 +259,7 @@ export default function App() {
 
   const exportBackup = async () => {
     try {
-      const keys = await AsyncStorage.getAllKeys();
-      const items = await AsyncStorage.multiGet(keys);
-      const backupData = {};
-      items.forEach(([key, value]) => {
-        backupData[key] = value;
-      });
-      const jsonString = JSON.stringify(backupData);
-      const fileUri = FileSystem.documentDirectory + 'abc_controle_chamados_backup.json';
-      await FileSystem.writeAsStringAsync(fileUri, jsonString, { encoding: FileSystem.EncodingType.UTF8 });
-      await Sharing.shareAsync(fileUri, { mimeType: 'application/json', dialogTitle: 'Salvar Backup' });
+      await exportBackupFile();
     } catch (e) {
       Alert.alert("Erro", "Falha ao gerar o arquivo de backup.");
     }
@@ -292,13 +267,8 @@ export default function App() {
 
   const importBackup = async () => {
     try {
-      const result = await DocumentPicker.getDocumentAsync({ type: 'application/json', copyToCacheDirectory: true });
-      if (result.canceled) return;
-      const file = result.assets[0];
-      const jsonString = await FileSystem.readAsStringAsync(file.uri, { encoding: FileSystem.EncodingType.UTF8 });
-      const backupData = JSON.parse(jsonString);
-      const kvPairs = Object.entries(backupData);
-      await AsyncStorage.multiSet(kvPairs);
+      const restored = await importBackupFile();
+      if (!restored) return;
       Alert.alert("Sucesso", "Backup restaurado! O aplicativo será desconectado para carregar os novos dados.");
       handleLogout();
     } catch (e) {
@@ -458,8 +428,27 @@ export default function App() {
     } else {
       setClient(c.name);
       setUnit(c.unit);
+      setIsOtherRequester(!SOLICITANTES_PADRAO.slice(0, -1).includes(c.name));
     }
+    setClientSearch('');
     setSelectClientModal(false);
+  };
+
+  const selectUnit = (selectedUnit) => {
+    setUnit(selectedUnit.name);
+    setUnitModalVisible(false);
+  };
+
+  const selectRequester = (requester) => {
+    const isOther = requester === 'Outros';
+    setIsOtherRequester(isOther);
+    setClient(isOther ? '' : requester);
+    setRequesterModalVisible(false);
+  };
+
+  const selectSector = (selectedSector) => {
+    setSector(selectedSector);
+    setSectorModalVisible(false);
   };
 
   const addBudgetMaterial = () => {
@@ -538,7 +527,7 @@ export default function App() {
   };
 
   const finishOS = async () => {
-    if (!client || !unit || !respSignature || !techSignature || servicesList.length === 0) {
+    if (!client || !unit || !sector || !respName || !respSignature || !techSignature || servicesList.length === 0) {
       Alert.alert("Pendência", "Preencha todos os campos e colete as assinaturas.");
       return;
     }
@@ -547,7 +536,7 @@ export default function App() {
       const osData = {
         id: Date.now().toString(),
         date: new Date().toLocaleString(),
-        client, unit, respName,
+        client, unit, sector, respName,
         techName: user.name,
         techCpf: user.cpf,
         services: servicesList,
@@ -575,10 +564,11 @@ export default function App() {
   };
 
   const clearForm = () => {
-    setClient(''); setUnit(''); setRespName('');
+    setClient(''); setUnit(''); setSector(''); setRespName('');
+    setIsOtherRequester(false);
     setServicesList([]); setTempService('');
     setUsedMaterialsList([]); setTempUsedMaterial('');
-    setSelectedEquipment([]); setEquipmentSearch('');
+    setSelectedEquipment([]);
     setPhotos([]);
     setTechSignature(null); setRespSignature(null);
     setChecklist({ registro: false, local: false, evidencias: false });
@@ -651,7 +641,8 @@ export default function App() {
             <div class="section">
               <div class="sec-title">Dados do Chamado</div>
               <div class="row"><span class="label">Solicitante:</span> <span>${safeText(data.client)}</span></div>
-              <div class="row"><span class="label">Local:</span> <span>${safeText(data.unit)}</span></div>
+              <div class="row"><span class="label">Unidade:</span> <span>${safeText(data.unit)}</span></div>
+              <div class="row"><span class="label">Local ou setor:</span> <span>${safeText(data.sector || 'Não informado')}</span></div>
               <div class="row"><span class="label">Responsável no local:</span> <span>${safeText(data.respName)}</span></div>
             </div>
             <div class="section">
@@ -832,6 +823,8 @@ export default function App() {
     if (!osToReopen) return;
     setClient(osToReopen.client);
     setUnit(osToReopen.unit);
+    setSector(osToReopen.sector || '');
+    setIsOtherRequester(!SOLICITANTES_PADRAO.slice(0, -1).includes(osToReopen.client));
     setRespName(osToReopen.respName);
     setServicesList(osToReopen.services);
     setSelectedEquipment(osToReopen.equipment || []);
@@ -844,6 +837,12 @@ export default function App() {
     setOsToReopen(null);
     setScreen('form');
   };
+
+  const filteredClients = clientsDb.filter(item => {
+    const query = clientSearch.trim().toLocaleLowerCase();
+    if (!query) return true;
+    return item.name.toLocaleLowerCase().includes(query) || item.unit.toLocaleLowerCase().includes(query);
+  });
 
   if (!fontsLoaded || screen === 'loading') {
     return <View style={styles.centerLoad}><Text style={{ color: '#0078D4', fontFamily: 'Poppins_600SemiBold' }}>Carregando sistema...</Text></View>;
@@ -1136,10 +1135,12 @@ export default function App() {
                 <Text style={{ color: '#0078D4', fontSize: 12, fontFamily: 'Poppins_600SemiBold', marginLeft: 4 }}>Buscar solicitante</Text>
               </TouchableOpacity>
             </View>
+
             <TextInput style={styles.formInput} value={budgetClient} onChangeText={setBudgetClient} placeholder="Solicitante" placeholderTextColor="#A19F9D" />
             <TextInput style={styles.formInput} value={budgetUnit} onChangeText={setBudgetUnit} placeholder="Local" placeholderTextColor="#A19F9D" />
             <TextInput style={styles.formInput} value={budgetRespName} onChangeText={setBudgetRespName} placeholder="Responsável no local" placeholderTextColor="#A19F9D" />
           </View>
+
 
           <View style={styles.formSection}>
             <Text style={styles.fieldLabel}>Necessidade identificada</Text>
@@ -1209,8 +1210,13 @@ export default function App() {
           <View style={styles.modalOverlay}>
             <View style={[styles.modalContent, { maxHeight: '80%' }]}>
               <Text style={styles.modalTitle}>Selecionar solicitante</Text>
+              <View style={[styles.equipmentSearchBox, { margin: 0, marginBottom: 12 }]}>
+                <Ionicons name="search" size={19} color="#605E5C" />
+                <TextInput style={styles.equipmentSearchInput} value={clientSearch} onChangeText={setClientSearch} placeholder="Buscar loja ou solicitante..." placeholderTextColor="#8A8886" />
+                {clientSearch !== '' && <TouchableOpacity onPress={() => setClientSearch('')}><Ionicons name="close-circle" size={20} color="#8A8886" /></TouchableOpacity>}
+              </View>
               <FlatList
-                data={clientsDb}
+                data={filteredClients}
                 keyExtractor={item => item.id}
                 renderItem={({ item }) => (
                   <TouchableOpacity style={styles.osCard} onPress={() => selectClientForOs(item)}>
@@ -1267,7 +1273,7 @@ export default function App() {
     return (
       <SafeAreaView style={{ flex: 1, backgroundColor: '#F3F2F1' }}>
         <View style={styles.navBar}>
-          <TouchableOpacity onPress={() => setScreen('home')} style={styles.navBtn}><Ionicons name="arrow-back" size={24} color="#0078D4" /></TouchableOpacity>
+          <TouchableOpacity onPress={() => { setClientSearch(''); setScreen('home'); }} style={styles.navBtn}><Ionicons name="arrow-back" size={24} color="#0078D4" /></TouchableOpacity>
           <Text style={styles.navTitle}>Solicitantes</Text>
           <TouchableOpacity onPress={() => {
             setEditingClientId(null);
@@ -1276,8 +1282,13 @@ export default function App() {
             setClientModalVisible(true);
           }} style={styles.navBtn}><Ionicons name="add" size={24} color="#0078D4" /></TouchableOpacity>
         </View>
+        <View style={styles.searchContainer}>
+          <Ionicons name="search" size={20} color="#A19F9D" />
+          <TextInput style={styles.searchInput} placeholder="Buscar loja ou solicitante..." placeholderTextColor="#A19F9D" value={clientSearch} onChangeText={setClientSearch} />
+          {clientSearch !== '' && <TouchableOpacity onPress={() => setClientSearch('')}><Ionicons name="close-circle" size={20} color="#A19F9D" /></TouchableOpacity>}
+        </View>
         <FlatList
-          data={clientsDb}
+          data={filteredClients}
           keyExtractor={item => item.id}
           contentContainerStyle={{ padding: 20 }}
           ListEmptyComponent={<Text style={{ textAlign: 'center', color: '#A19F9D', marginTop: 20, fontFamily: 'Poppins_400Regular' }}>Nenhum solicitante cadastrado.</Text>}
@@ -1332,9 +1343,29 @@ export default function App() {
               <Text style={[styles.fieldLabel, { marginBottom: 0 }]}>Informações Gerais</Text>
               <TouchableOpacity onPress={() => setSelectClientModal(true)} style={{ flexDirection: 'row', alignItems: 'center' }}><Ionicons name="search" size={16} color="#0078D4" /><Text style={{ color: '#0078D4', fontSize: 12, fontFamily: 'Poppins_600SemiBold', marginLeft: 4 }}>Buscar solicitante</Text></TouchableOpacity>
             </View>
-            <TextInput style={styles.formInput} value={client} onChangeText={setClient} placeholder="Solicitante" placeholderTextColor="#A19F9D" />
-            <TextInput style={styles.formInput} value={unit} onChangeText={setUnit} placeholder="Local ou setor" placeholderTextColor="#A19F9D" />
-            <TextInput style={styles.formInput} value={respName} onChangeText={setRespName} placeholder="Responsável no local" placeholderTextColor="#A19F9D" />
+            <Text style={styles.formFieldCaption}>Unidade</Text>
+            <TouchableOpacity style={styles.selectField} onPress={() => setUnitModalVisible(true)}>
+              <Text style={[styles.selectFieldText, !unit && styles.selectFieldPlaceholder]}>{unit || 'Selecione a unidade'}</Text>
+              <Ionicons name="chevron-down" size={20} color="#0078D4" />
+            </TouchableOpacity>
+
+            <Text style={styles.formFieldCaption}>Solicitante</Text>
+            <TouchableOpacity style={styles.selectField} onPress={() => setRequesterModalVisible(true)}>
+              <Text style={[styles.selectFieldText, !client && styles.selectFieldPlaceholder]}>{isOtherRequester ? 'Outros' : (client || 'Selecione o cargo do solicitante')}</Text>
+              <Ionicons name="chevron-down" size={20} color="#0078D4" />
+            </TouchableOpacity>
+            {isOtherRequester && (
+              <TextInput style={styles.formInput} value={client} onChangeText={setClient} placeholder="Digite o solicitante" placeholderTextColor="#A19F9D" autoFocus />
+            )}
+
+            <Text style={styles.formFieldCaption}>Local ou setor</Text>
+            <TouchableOpacity style={styles.selectField} onPress={() => setSectorModalVisible(true)}>
+              <Text style={[styles.selectFieldText, !sector && styles.selectFieldPlaceholder]}>{sector || 'Selecione o local ou setor'}</Text>
+              <Ionicons name="chevron-down" size={20} color="#0078D4" />
+            </TouchableOpacity>
+
+            <Text style={styles.formFieldCaption}>Responsável no local</Text>
+            <TextInput style={styles.formInput} value={respName} onChangeText={setRespName} placeholder="Nome do responsável" placeholderTextColor="#A19F9D" />
           </View>
 
           <View style={styles.formSection}>
@@ -1446,56 +1477,59 @@ export default function App() {
           <TouchableOpacity style={styles.btnFinalize} onPress={finishOS}><Text style={styles.btnFinalizeText}>Concluir Chamado</Text></TouchableOpacity>
         </ScrollView>
 
-        <Modal visible={equipmentModalVisible} animationType="slide" onRequestClose={() => setEquipmentModalVisible(false)}>
-          <SafeAreaView style={styles.equipmentModalSafe}>
-            <View style={styles.navBar}>
-              <TouchableOpacity onPress={() => setEquipmentModalVisible(false)} style={styles.navBtn}><Ionicons name="arrow-back" size={24} color="#0078D4" /></TouchableOpacity>
-              <Text style={styles.navTitle}>Equipamentos</Text>
-              <TouchableOpacity onPress={() => setEquipmentModalVisible(false)} style={styles.navBtn}><Ionicons name="checkmark" size={24} color="#107C10" /></TouchableOpacity>
-            </View>
-            <View style={styles.equipmentSearchBox}>
-              <Ionicons name="search" size={20} color="#605E5C" />
-              <TextInput
-                style={styles.equipmentSearchInput}
-                value={equipmentSearch}
-                onChangeText={setEquipmentSearch}
-                placeholder="Buscar equipamento..."
-                placeholderTextColor="#8A8886"
-              />
-              {equipmentSearch !== '' && <TouchableOpacity onPress={() => setEquipmentSearch('')}><Ionicons name="close-circle" size={20} color="#8A8886" /></TouchableOpacity>}
-            </View>
-            <Text style={styles.equipmentSelectionCount}>{selectedEquipment.length} selecionado(s)</Text>
-            <ScrollView contentContainerStyle={styles.equipmentList}>
-              {Object.entries(EQUIPAMENTOS_MANUTENCAO).map(([category, items]) => {
-                const filteredItems = items.filter(item => item.toLocaleLowerCase().includes(equipmentSearch.toLocaleLowerCase()));
-                if (filteredItems.length === 0) return null;
-                return (
-                  <View key={category} style={styles.equipmentCategory}>
-                    <Text style={styles.equipmentCategoryTitle}>{category}</Text>
-                    {filteredItems.map(item => {
-                      const selected = selectedEquipment.includes(item);
-                      return (
-                        <TouchableOpacity key={item} onPress={() => toggleEquipment(item)} style={[styles.equipmentOption, selected && styles.equipmentOptionSelected]}>
-                          <View style={[styles.equipmentCheck, selected && styles.equipmentCheckSelected]}>
-                            {selected && <Ionicons name="checkmark" size={16} color="#FFFFFF" />}
-                          </View>
-                          <Text style={[styles.equipmentOptionText, selected && styles.equipmentOptionTextSelected]}>{item}</Text>
-                        </TouchableOpacity>
-                      );
-                    })}
-                  </View>
-                );
-              })}
-            </ScrollView>
-          </SafeAreaView>
-        </Modal>
+        <SelectionModal
+          visible={unitModalVisible}
+          title="Selecionar unidade"
+          items={LOJAS_PADRAO}
+          selectedValue={unit}
+          onClose={() => setUnitModalVisible(false)}
+          onSelect={selectUnit}
+          searchable
+          searchPlaceholder="Buscar unidade..."
+          getLabel={item => item.name}
+          getKey={item => item.id}
+          getIcon={() => 'storefront-outline'}
+        />
+
+        <SelectionModal
+          visible={requesterModalVisible}
+          title="Selecionar solicitante"
+          items={SOLICITANTES_PADRAO}
+          selectedValue={isOtherRequester ? 'Outros' : client}
+          onClose={() => setRequesterModalVisible(false)}
+          onSelect={selectRequester}
+          getIcon={item => item === 'Outros' ? 'create-outline' : 'person-outline'}
+        />
+
+        <SelectionModal
+          visible={sectorModalVisible}
+          title="Local ou setor"
+          items={SETORES_PADRAO}
+          selectedValue={sector}
+          onClose={() => setSectorModalVisible(false)}
+          onSelect={selectSector}
+          getIcon={() => 'business-outline'}
+        />
+
+        <EquipmentSelectionModal
+          visible={equipmentModalVisible}
+          categories={EQUIPAMENTOS_MANUTENCAO}
+          selectedItems={selectedEquipment}
+          onToggle={toggleEquipment}
+          onClose={() => setEquipmentModalVisible(false)}
+        />
 
         <Modal visible={selectClientModal} transparent animationType="slide">
           <View style={styles.modalOverlay}>
             <View style={[styles.modalContent, { maxHeight: '80%' }]}>
               <Text style={styles.modalTitle}>Selecionar solicitante</Text>
+              <View style={[styles.equipmentSearchBox, { margin: 0, marginBottom: 12 }]}>
+                <Ionicons name="search" size={19} color="#605E5C" />
+                <TextInput style={styles.equipmentSearchInput} value={clientSearch} onChangeText={setClientSearch} placeholder="Buscar loja ou solicitante..." placeholderTextColor="#8A8886" />
+                {clientSearch !== '' && <TouchableOpacity onPress={() => setClientSearch('')}><Ionicons name="close-circle" size={20} color="#8A8886" /></TouchableOpacity>}
+              </View>
               <FlatList
-                data={clientsDb}
+                data={filteredClients}
                 keyExtractor={item => item.id}
                 renderItem={({ item }) => (
                   <TouchableOpacity style={styles.osCard} onPress={() => selectClientForOs(item)}>
@@ -1577,7 +1611,8 @@ export default function App() {
   const isTrash = screen === 'trash';
   const filteredHistory = osHistory.filter(item =>
     item.client.toLowerCase().includes(searchText.toLowerCase()) ||
-    item.unit.toLowerCase().includes(searchText.toLowerCase())
+    item.unit.toLowerCase().includes(searchText.toLowerCase()) ||
+    (item.sector || '').toLowerCase().includes(searchText.toLowerCase())
   );
 
   return (
@@ -1612,7 +1647,7 @@ export default function App() {
               <Text style={{ fontFamily: 'Poppins_600SemiBold', color: '#201F1E', fontSize: 14 }}>{item.client}</Text>
               <Text style={{ fontFamily: 'Poppins_400Regular', color: '#605E5C', fontSize: 11 }}>#{item.id?.slice(-6)}</Text>
             </View>
-            <Text style={{ fontFamily: 'Poppins_400Regular', color: '#605E5C', fontSize: 12, marginTop: 4 }}>{item.date} | {item.unit}</Text>
+            <Text style={{ fontFamily: 'Poppins_400Regular', color: '#605E5C', fontSize: 12, marginTop: 4 }}>{item.date} | {item.unit}{item.sector ? ` | ${item.sector}` : ''}</Text>
             <View style={{ height: 1, backgroundColor: '#EDEBE9', marginVertical: 12 }} />
             <View style={{ flexDirection: 'row', justifyContent: 'flex-end', gap: 10 }}>
               {!isTrash ? (
@@ -1679,6 +1714,10 @@ const styles = StyleSheet.create({
   formScroll: { padding: 20 },
   formSection: { backgroundColor: '#FFF', padding: 15, borderRadius: 8, marginBottom: 15 },
   fieldLabel: { fontSize: 12, fontWeight: 'bold', color: '#0078D4', marginBottom: 10 },
+  formFieldCaption: { color: '#323130', fontFamily: 'Poppins_600SemiBold', fontSize: 11, marginBottom: 6, marginTop: 2 },
+  selectField: { minHeight: 48, borderWidth: 1, borderColor: '#D1D1D1', borderRadius: 7, paddingHorizontal: 12, marginBottom: 12, backgroundColor: '#FFFFFF', flexDirection: 'row', alignItems: 'center' },
+  selectFieldText: { flex: 1, color: '#201F1E', fontFamily: 'Poppins_400Regular', fontSize: 13 },
+  selectFieldPlaceholder: { color: '#A19F9D' },
   selectionHint: { color: '#605E5C', fontSize: 12, fontFamily: 'Poppins_400Regular', marginBottom: 12 },
   equipmentPickerBtn: { borderWidth: 1, borderColor: '#B3D6F2', borderRadius: 8, backgroundColor: '#F5FAFE' },
   equipmentPickerMain: { minHeight: 64, flexDirection: 'row', alignItems: 'center', padding: 12 },
@@ -1688,19 +1727,8 @@ const styles = StyleSheet.create({
   equipmentChips: { flexDirection: 'row', flexWrap: 'wrap', marginTop: 12, gap: 7 },
   equipmentChip: { flexDirection: 'row', alignItems: 'center', maxWidth: '100%', backgroundColor: '#E5F3FF', borderRadius: 16, paddingVertical: 6, paddingLeft: 10, paddingRight: 7, gap: 5 },
   equipmentChipText: { flexShrink: 1, color: '#005A9E', fontFamily: 'Poppins_400Regular', fontSize: 11 },
-  equipmentModalSafe: { flex: 1, backgroundColor: '#F3F2F1' },
   equipmentSearchBox: { flexDirection: 'row', alignItems: 'center', margin: 16, marginBottom: 8, paddingHorizontal: 13, height: 48, backgroundColor: '#FFFFFF', borderRadius: 8, borderWidth: 1, borderColor: '#D1D1D1' },
   equipmentSearchInput: { flex: 1, marginLeft: 9, color: '#201F1E', fontFamily: 'Poppins_400Regular', fontSize: 14 },
-  equipmentSelectionCount: { color: '#005A9E', fontFamily: 'Poppins_600SemiBold', fontSize: 12, marginHorizontal: 20, marginBottom: 8 },
-  equipmentList: { padding: 16, paddingTop: 4, paddingBottom: 32 },
-  equipmentCategory: { backgroundColor: '#FFFFFF', borderRadius: 8, overflow: 'hidden', marginBottom: 14, borderWidth: 1, borderColor: '#EDEBE9' },
-  equipmentCategoryTitle: { backgroundColor: '#F5FAFE', paddingHorizontal: 14, paddingVertical: 10, color: '#005A9E', fontFamily: 'Poppins_600SemiBold', fontSize: 12 },
-  equipmentOption: { minHeight: 54, flexDirection: 'row', alignItems: 'center', paddingHorizontal: 14, borderTopWidth: 1, borderTopColor: '#F3F2F1' },
-  equipmentOptionSelected: { backgroundColor: '#EDF8F0' },
-  equipmentCheck: { width: 22, height: 22, borderWidth: 1.5, borderColor: '#8A8886', borderRadius: 5, marginRight: 11, justifyContent: 'center', alignItems: 'center' },
-  equipmentCheckSelected: { backgroundColor: '#107C10', borderColor: '#107C10' },
-  equipmentOptionText: { flex: 1, color: '#323130', fontFamily: 'Poppins_400Regular', fontSize: 13 },
-  equipmentOptionTextSelected: { color: '#107C10', fontFamily: 'Poppins_600SemiBold' },
   formInput: { borderWidth: 1, borderColor: '#DDD', padding: 10, borderRadius: 4, marginBottom: 10 },
   checkItem: { flexDirection: 'row', alignItems: 'center', marginBottom: 10 },
   checkText: { marginLeft: 10 },
