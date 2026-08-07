@@ -21,6 +21,43 @@ import * as ScreenOrientation from 'expo-screen-orientation';
 const EMPRESA_NOME = "CONTROLE DE CHAMADOS ABC";
 const LOGO_SOURCE = require('./assets/logo.png');
 
+const EQUIPAMENTOS_MANUTENCAO = {
+  'PDV e atendimento': [
+    'Computador (CPU/Mini PC)',
+    'Monitor do Operador',
+    'Teclado PDV Programável',
+    'Mouse Óptico',
+    'Display de Cliente (Torre eletrônica)',
+    'Leitor de Código de Barras Fixo (Mesa)',
+    'Leitor de Código de Barras Manual (Mão)',
+    'Leitor de Código de Barras Omnidirecional',
+    'Leitor de QRCode / Câmera Biométrica',
+    'Impressora Térmica Não Fiscal (Cupom)',
+    'Pin Pad (Terminal TEF Integrado)',
+    'Módulo Fiscal Blindado (SAT ou MFE)',
+    'Gaveta de Dinheiro com Abertura Elétrica'
+  ],
+  'Rede e energia': [
+    'Nobreak (UPS)',
+    'Estabilizador de Tensão Profissional',
+    'Filtro de Linha',
+    'Switch de Rede Giga',
+    'Roteador Wi-Fi Corporativo',
+    'Cabo de Rede RJ45 Categoria 6',
+    'Modem 4G/5G de Contingência (Internet reserva)'
+  ],
+  'Operação e infraestrutura': [
+    'Coletor de Dados Portátil (Android/Windows Mobile)',
+    'Terminal de Consulta (Totem Busca-Preço)',
+    'Balança Comercial Inteligente com Wi-Fi/Rede',
+    'Servidor Local de Banco de Dados do PDV'
+  ],
+  'Segurança': [
+    'Câmera de Monitoramento CFTV IP (Focada na gaveta)',
+    'Gravador de Vídeo Digital (DVR/NVR)'
+  ]
+};
+
 LogBox.ignoreAllLogs();
 
 export default function App() {
@@ -46,6 +83,9 @@ export default function App() {
   const [servicesList, setServicesList] = useState([]);
   const [tempUsedMaterial, setTempUsedMaterial] = useState('');
   const [usedMaterialsList, setUsedMaterialsList] = useState([]);
+  const [selectedEquipment, setSelectedEquipment] = useState([]);
+  const [equipmentModalVisible, setEquipmentModalVisible] = useState(false);
+  const [equipmentSearch, setEquipmentSearch] = useState('');
   const [photos, setPhotos] = useState([]);
 
   const [checklist, setChecklist] = useState({
@@ -290,6 +330,14 @@ export default function App() {
     setUsedMaterialsList(newList);
   };
 
+  const toggleEquipment = (equipment) => {
+    setSelectedEquipment(current =>
+      current.includes(equipment)
+        ? current.filter(item => item !== equipment)
+        : [...current, equipment]
+    );
+  };
+
   const pickImage = async () => {
     try {
       const permissionResult = await ImagePicker.requestCameraPermissionsAsync();
@@ -503,6 +551,7 @@ export default function App() {
         techName: user.name,
         techCpf: user.cpf,
         services: servicesList,
+        equipment: selectedEquipment,
         materialsUsed: usedMaterialsList,
         photos: photos,
         checklist,
@@ -529,6 +578,7 @@ export default function App() {
     setClient(''); setUnit(''); setRespName('');
     setServicesList([]); setTempService('');
     setUsedMaterialsList([]); setTempUsedMaterial('');
+    setSelectedEquipment([]); setEquipmentSearch('');
     setPhotos([]);
     setTechSignature(null); setRespSignature(null);
     setChecklist({ registro: false, local: false, evidencias: false });
@@ -607,6 +657,10 @@ export default function App() {
             <div class="section">
               <div class="sec-title">Atendimento Realizado</div>
               ${data.services.map(s => `<div class="list-item">&#8226; ${safeText(s)}</div>`).join('')}
+            </div>
+            <div class="section">
+              <div class="sec-title">Equipamentos em Manutenção</div>
+              ${(data.equipment || []).length > 0 ? data.equipment.map(item => `<div class="list-item">&#8226; ${safeText(item)}</div>`).join('') : '<div class="list-item">Nenhum equipamento selecionado.</div>'}
             </div>
             <div class="section">
               <div class="sec-title">Recursos Utilizados</div>
@@ -780,6 +834,7 @@ export default function App() {
     setUnit(osToReopen.unit);
     setRespName(osToReopen.respName);
     setServicesList(osToReopen.services);
+    setSelectedEquipment(osToReopen.equipment || []);
     setUsedMaterialsList(osToReopen.materialsUsed || []);
     setPhotos(osToReopen.photos || []);
     setChecklist(osToReopen.checklist || { registro: false, local: false, evidencias: false });
@@ -1283,6 +1338,31 @@ export default function App() {
           </View>
 
           <View style={styles.formSection}>
+            <Text style={styles.fieldLabel}>Equipamentos em manutenção</Text>
+            <Text style={styles.selectionHint}>Selecione todos os itens atendidos neste chamado.</Text>
+            <TouchableOpacity onPress={() => setEquipmentModalVisible(true)} style={styles.equipmentPickerBtn}>
+              <View style={styles.equipmentPickerMain}>
+                <View style={styles.equipmentPickerIcon}><Ionicons name="hardware-chip-outline" size={21} color="#0078D4" /></View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.equipmentPickerTitle}>Selecionar equipamentos</Text>
+                  <Text style={styles.equipmentPickerSubtitle}>{selectedEquipment.length === 0 ? 'Nenhum item selecionado' : `${selectedEquipment.length} item(ns) selecionado(s)`}</Text>
+                </View>
+                <Ionicons name="chevron-forward" size={20} color="#0078D4" />
+              </View>
+            </TouchableOpacity>
+            {selectedEquipment.length > 0 && (
+              <View style={styles.equipmentChips}>
+                {selectedEquipment.map(item => (
+                  <TouchableOpacity key={item} onPress={() => toggleEquipment(item)} style={styles.equipmentChip}>
+                    <Text style={styles.equipmentChipText}>{item}</Text>
+                    <Ionicons name="close-circle" size={16} color="#0078D4" />
+                  </TouchableOpacity>
+                ))}
+              </View>
+            )}
+          </View>
+
+          <View style={styles.formSection}>
             <Text style={styles.fieldLabel}>Checklist do Atendimento</Text>
             <TouchableOpacity onPress={() => setChecklist({ ...checklist, registro: !checklist.registro })} style={styles.checkItem}>
               <Ionicons name={checklist.registro ? "checkbox" : "square-outline"} size={22} color={checklist.registro ? "#107C10" : "#A19F9D"} />
@@ -1365,6 +1445,50 @@ export default function App() {
           </View>
           <TouchableOpacity style={styles.btnFinalize} onPress={finishOS}><Text style={styles.btnFinalizeText}>Concluir Chamado</Text></TouchableOpacity>
         </ScrollView>
+
+        <Modal visible={equipmentModalVisible} animationType="slide" onRequestClose={() => setEquipmentModalVisible(false)}>
+          <SafeAreaView style={styles.equipmentModalSafe}>
+            <View style={styles.navBar}>
+              <TouchableOpacity onPress={() => setEquipmentModalVisible(false)} style={styles.navBtn}><Ionicons name="arrow-back" size={24} color="#0078D4" /></TouchableOpacity>
+              <Text style={styles.navTitle}>Equipamentos</Text>
+              <TouchableOpacity onPress={() => setEquipmentModalVisible(false)} style={styles.navBtn}><Ionicons name="checkmark" size={24} color="#107C10" /></TouchableOpacity>
+            </View>
+            <View style={styles.equipmentSearchBox}>
+              <Ionicons name="search" size={20} color="#605E5C" />
+              <TextInput
+                style={styles.equipmentSearchInput}
+                value={equipmentSearch}
+                onChangeText={setEquipmentSearch}
+                placeholder="Buscar equipamento..."
+                placeholderTextColor="#8A8886"
+              />
+              {equipmentSearch !== '' && <TouchableOpacity onPress={() => setEquipmentSearch('')}><Ionicons name="close-circle" size={20} color="#8A8886" /></TouchableOpacity>}
+            </View>
+            <Text style={styles.equipmentSelectionCount}>{selectedEquipment.length} selecionado(s)</Text>
+            <ScrollView contentContainerStyle={styles.equipmentList}>
+              {Object.entries(EQUIPAMENTOS_MANUTENCAO).map(([category, items]) => {
+                const filteredItems = items.filter(item => item.toLocaleLowerCase().includes(equipmentSearch.toLocaleLowerCase()));
+                if (filteredItems.length === 0) return null;
+                return (
+                  <View key={category} style={styles.equipmentCategory}>
+                    <Text style={styles.equipmentCategoryTitle}>{category}</Text>
+                    {filteredItems.map(item => {
+                      const selected = selectedEquipment.includes(item);
+                      return (
+                        <TouchableOpacity key={item} onPress={() => toggleEquipment(item)} style={[styles.equipmentOption, selected && styles.equipmentOptionSelected]}>
+                          <View style={[styles.equipmentCheck, selected && styles.equipmentCheckSelected]}>
+                            {selected && <Ionicons name="checkmark" size={16} color="#FFFFFF" />}
+                          </View>
+                          <Text style={[styles.equipmentOptionText, selected && styles.equipmentOptionTextSelected]}>{item}</Text>
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </View>
+                );
+              })}
+            </ScrollView>
+          </SafeAreaView>
+        </Modal>
 
         <Modal visible={selectClientModal} transparent animationType="slide">
           <View style={styles.modalOverlay}>
@@ -1555,6 +1679,28 @@ const styles = StyleSheet.create({
   formScroll: { padding: 20 },
   formSection: { backgroundColor: '#FFF', padding: 15, borderRadius: 8, marginBottom: 15 },
   fieldLabel: { fontSize: 12, fontWeight: 'bold', color: '#0078D4', marginBottom: 10 },
+  selectionHint: { color: '#605E5C', fontSize: 12, fontFamily: 'Poppins_400Regular', marginBottom: 12 },
+  equipmentPickerBtn: { borderWidth: 1, borderColor: '#B3D6F2', borderRadius: 8, backgroundColor: '#F5FAFE' },
+  equipmentPickerMain: { minHeight: 64, flexDirection: 'row', alignItems: 'center', padding: 12 },
+  equipmentPickerIcon: { width: 38, height: 38, borderRadius: 19, backgroundColor: '#E5F3FF', justifyContent: 'center', alignItems: 'center', marginRight: 10 },
+  equipmentPickerTitle: { color: '#201F1E', fontFamily: 'Poppins_600SemiBold', fontSize: 14 },
+  equipmentPickerSubtitle: { color: '#605E5C', fontFamily: 'Poppins_400Regular', fontSize: 11, marginTop: 2 },
+  equipmentChips: { flexDirection: 'row', flexWrap: 'wrap', marginTop: 12, gap: 7 },
+  equipmentChip: { flexDirection: 'row', alignItems: 'center', maxWidth: '100%', backgroundColor: '#E5F3FF', borderRadius: 16, paddingVertical: 6, paddingLeft: 10, paddingRight: 7, gap: 5 },
+  equipmentChipText: { flexShrink: 1, color: '#005A9E', fontFamily: 'Poppins_400Regular', fontSize: 11 },
+  equipmentModalSafe: { flex: 1, backgroundColor: '#F3F2F1' },
+  equipmentSearchBox: { flexDirection: 'row', alignItems: 'center', margin: 16, marginBottom: 8, paddingHorizontal: 13, height: 48, backgroundColor: '#FFFFFF', borderRadius: 8, borderWidth: 1, borderColor: '#D1D1D1' },
+  equipmentSearchInput: { flex: 1, marginLeft: 9, color: '#201F1E', fontFamily: 'Poppins_400Regular', fontSize: 14 },
+  equipmentSelectionCount: { color: '#005A9E', fontFamily: 'Poppins_600SemiBold', fontSize: 12, marginHorizontal: 20, marginBottom: 8 },
+  equipmentList: { padding: 16, paddingTop: 4, paddingBottom: 32 },
+  equipmentCategory: { backgroundColor: '#FFFFFF', borderRadius: 8, overflow: 'hidden', marginBottom: 14, borderWidth: 1, borderColor: '#EDEBE9' },
+  equipmentCategoryTitle: { backgroundColor: '#F5FAFE', paddingHorizontal: 14, paddingVertical: 10, color: '#005A9E', fontFamily: 'Poppins_600SemiBold', fontSize: 12 },
+  equipmentOption: { minHeight: 54, flexDirection: 'row', alignItems: 'center', paddingHorizontal: 14, borderTopWidth: 1, borderTopColor: '#F3F2F1' },
+  equipmentOptionSelected: { backgroundColor: '#EDF8F0' },
+  equipmentCheck: { width: 22, height: 22, borderWidth: 1.5, borderColor: '#8A8886', borderRadius: 5, marginRight: 11, justifyContent: 'center', alignItems: 'center' },
+  equipmentCheckSelected: { backgroundColor: '#107C10', borderColor: '#107C10' },
+  equipmentOptionText: { flex: 1, color: '#323130', fontFamily: 'Poppins_400Regular', fontSize: 13 },
+  equipmentOptionTextSelected: { color: '#107C10', fontFamily: 'Poppins_600SemiBold' },
   formInput: { borderWidth: 1, borderColor: '#DDD', padding: 10, borderRadius: 4, marginBottom: 10 },
   checkItem: { flexDirection: 'row', alignItems: 'center', marginBottom: 10 },
   checkText: { marginLeft: 10 },
