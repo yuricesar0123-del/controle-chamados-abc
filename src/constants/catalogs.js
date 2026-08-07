@@ -54,7 +54,7 @@ export const SOLICITANTES_PADRAO = [
   'Encarregado (a) de Mercearia',
   'Encarregado (a) de Frios',
   'Encarregado (a) de Padaria',
-  'Encarregado de Horti',
+  'Encarregado (a) de Horti',
   'Encarregado (a) de Açougue',
   'Encarregado (a) Recebimento',
   'Analista de RH',

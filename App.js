@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import {
   StyleSheet, Text, View, TextInput, TouchableOpacity, ScrollView,
-  Alert, Image, Modal, StatusBar, Keyboard, Platform, KeyboardAvoidingView, Switch, FlatList
+  Alert, Image, Modal, StatusBar, Keyboard, Platform, KeyboardAvoidingView, Switch, FlatList, AppState
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
@@ -27,6 +27,14 @@ import SelectionModal from './src/components/SelectionModal';
 import EquipmentSelectionModal from './src/components/EquipmentSelectionModal';
 import { exportBackupFile, importBackupFile } from './src/services/backupService';
 import { isActivationCodeValid } from './src/security/activation';
+import {
+  DEFAULT_SYNC_SERVER_URL,
+  enqueuePdfForSync,
+  getSyncState,
+  saveSyncConfiguration,
+  syncPendingPdfs,
+  testSyncConnection
+} from './src/services/syncService';
 
 const LOGO_SOURCE = require('./assets/logo.png');
 
@@ -107,9 +115,32 @@ export default function App() {
   const [trialDaysLeft, setTrialDaysLeft] = useState(-1);
   const [unlockCode, setUnlockCode] = useState('');
   const [activationModalVisible, setActivationModalVisible] = useState(false);
+  const [syncServerUrl, setSyncServerUrl] = useState(DEFAULT_SYNC_SERVER_URL);
+  const [syncPairingToken, setSyncPairingToken] = useState('');
+  const [syncQueue, setSyncQueue] = useState([]);
+  const [syncLastAt, setSyncLastAt] = useState('');
+  const [syncStatus, setSyncStatus] = useState('not-configured');
+  const [syncStatusMessage, setSyncStatusMessage] = useState('Configure o pareamento com o notebook.');
+  const [syncBusy, setSyncBusy] = useState(false);
+  const syncInProgressRef = useRef(false);
 
   useEffect(() => {
     initializeApp();
+  }, []);
+
+  useEffect(() => {
+    refreshSyncState();
+    const appStateSubscription = AppState.addEventListener('change', nextState => {
+      if (nextState === 'active') handleSync(false);
+    });
+    const automaticSyncTimer = setInterval(() => {
+      if (AppState.currentState === 'active') handleSync(false);
+    }, 60_000);
+
+    return () => {
+      appStateSubscription.remove();
+      clearInterval(automaticSyncTimer);
+    };
   }, []);
 
   const initializeApp = async () => {
@@ -255,6 +286,112 @@ export default function App() {
     setLoginCpf('');
     setUser({ name: '', cpf: '' });
     setScreen('login');
+  };
+
+  const refreshSyncState = async () => {
+    try {
+      const state = await getSyncState();
+      setSyncServerUrl(state.configuration.serverUrl);
+      setSyncPairingToken(state.configuration.pairingToken);
+      setSyncQueue(state.queue);
+      setSyncLastAt(state.lastSync);
+      if (!state.configuration.configured) {
+        setSyncStatus('not-configured');
+        setSyncStatusMessage('Configure o pareamento com o notebook.');
+      } else {
+        setSyncStatus(current => current === 'not-configured' ? 'ready' : current);
+        setSyncStatusMessage(current => current === 'Configure o pareamento com o notebook.' ? 'Pronto para verificar o servidor.' : current);
+      }
+    } catch (error) {
+      setSyncStatus('error');
+      setSyncStatusMessage('Não foi possível carregar a fila de sincronização.');
+    }
+  };
+
+  const handleTestSyncConnection = async (showSuccessAlert = true) => {
+    setSyncBusy(true);
+    setSyncStatus('checking');
+    setSyncStatusMessage('Procurando o servidor...');
+    try {
+      await testSyncConnection();
+      setSyncStatus('online');
+      setSyncStatusMessage('Notebook conectado e pronto para receber PDFs.');
+      if (showSuccessAlert) Alert.alert('Conectado', 'A comunicação com o notebook está funcionando.');
+      return true;
+    } catch (error) {
+      setSyncStatus('offline');
+      setSyncStatusMessage(error.message);
+      if (showSuccessAlert) Alert.alert('Servidor indisponível', error.message);
+      return false;
+    } finally {
+      setSyncBusy(false);
+    }
+  };
+
+  const handleSaveSyncConfiguration = async () => {
+    setSyncBusy(true);
+    try {
+      const configuration = await saveSyncConfiguration(syncServerUrl, syncPairingToken);
+      setSyncServerUrl(configuration.serverUrl);
+      setSyncPairingToken(configuration.pairingToken);
+      setSyncStatus('ready');
+      setSyncStatusMessage('Configuração salva. Verificando o notebook...');
+      await refreshSyncState();
+      await handleTestSyncConnection(true);
+    } catch (error) {
+      setSyncStatus('error');
+      setSyncStatusMessage(error.message);
+      Alert.alert('Configuração inválida', error.message);
+    } finally {
+      setSyncBusy(false);
+    }
+  };
+
+  const handleSync = async (manual = true) => {
+    if (syncInProgressRef.current) return;
+    syncInProgressRef.current = true;
+    setSyncBusy(true);
+
+    try {
+      const currentState = await getSyncState();
+      setSyncQueue(currentState.queue);
+      if (!currentState.configuration.configured) {
+        setSyncStatus('not-configured');
+        setSyncStatusMessage('Configure o pareamento com o notebook.');
+        if (manual) Alert.alert('Pareamento necessário', 'Informe o endereço e o código exibidos no servidor Windows.');
+        return;
+      }
+      if (!manual && currentState.queue.length === 0) return;
+
+      setSyncStatus('checking');
+      setSyncStatusMessage(currentState.queue.length > 0 ? 'Enviando PDFs pendentes...' : 'Verificando o servidor...');
+      const result = await syncPendingPdfs();
+      await refreshSyncState();
+      setSyncStatus('online');
+      setSyncStatusMessage(result.sent > 0
+        ? `${result.sent} PDF(s) enviado(s) com sucesso.`
+        : result.pending > 0
+          ? `${result.pending} PDF(s) continuam pendentes.`
+          : 'Tudo sincronizado com o notebook.');
+
+      if (manual) {
+        Alert.alert(
+          result.failed > 0 ? 'Sincronização parcial' : 'Sincronização concluída',
+          result.sent > 0
+            ? `${result.sent} PDF(s) enviado(s). ${result.pending} pendente(s).`
+            : result.pending > 0
+              ? `${result.pending} PDF(s) ainda estão pendentes.`
+              : 'Não existem PDFs pendentes.'
+        );
+      }
+    } catch (error) {
+      setSyncStatus('offline');
+      setSyncStatusMessage(error.message);
+      if (manual) Alert.alert('Não foi possível sincronizar', error.message);
+    } finally {
+      syncInProgressRef.current = false;
+      setSyncBusy(false);
+    }
   };
 
   const exportBackup = async () => {
@@ -535,6 +672,7 @@ export default function App() {
     try {
       const osData = {
         id: Date.now().toString(),
+        createdAt: new Date().toISOString(),
         date: new Date().toLocaleString(),
         client, unit, sector, respName,
         techName: user.name,
@@ -554,7 +692,7 @@ export default function App() {
       await AsyncStorage.setItem(`@abc_calls_history_${user.cpf}`, JSON.stringify(newHistory));
 
       Alert.alert("Sucesso", "Chamado salvo no dispositivo!");
-      await generatePDF(osData);
+      await generatePDF(osData, { queueForSync: true });
       clearForm();
       setScreen('home');
 
@@ -574,7 +712,7 @@ export default function App() {
     setChecklist({ registro: false, local: false, evidencias: false });
   };
 
-  const generatePDF = async (data) => {
+  const generatePDF = async (data, options = {}) => {
     try {
       const logoBase64 = await getLogoBase64();
       const logoImg = logoBase64 ? `<img src="${logoBase64}" class="logo-img" />` : ``;
@@ -671,6 +809,18 @@ export default function App() {
         </html>
       `;
       const { uri } = await Print.printToFileAsync({ html });
+      if (options.queueForSync) {
+        await enqueuePdfForSync(uri, {
+          id: data.id,
+          unit: data.unit,
+          client: data.client,
+          technician: data.techName,
+          createdAt: data.createdAt || new Date().toISOString(),
+          type: 'chamado',
+        });
+        await refreshSyncState();
+        handleSync(false);
+      }
       await Sharing.shareAsync(uri, { UTI: '.pdf', mimeType: 'application/pdf' });
     } catch (error) {
       Alert.alert("Erro no PDF", "Não foi possível gerar o arquivo PDF.");
@@ -686,6 +836,7 @@ export default function App() {
     try {
       const budgetData = {
         id: Date.now().toString(),
+        createdAt: new Date().toISOString(),
         date: new Date().toLocaleString(),
         client: budgetClient,
         unit: budgetUnit,
@@ -776,6 +927,16 @@ export default function App() {
       `;
 
       const { uri } = await Print.printToFileAsync({ html });
+      await enqueuePdfForSync(uri, {
+        id: budgetData.id,
+        unit: budgetData.unit,
+        client: budgetData.client,
+        technician: budgetData.techName,
+        createdAt: budgetData.createdAt,
+        type: 'recursos',
+      });
+      await refreshSyncState();
+      handleSync(false);
       await Sharing.shareAsync(uri, { UTI: '.pdf', mimeType: 'application/pdf' });
       Alert.alert("Sucesso", "Solicitação de recursos exportada em PDF.");
     } catch (error) {
@@ -949,6 +1110,117 @@ export default function App() {
     );
   }
 
+  if (screen === 'sync') {
+    const statusColor = syncStatus === 'online'
+      ? '#107C10'
+      : syncStatus === 'checking'
+        ? '#986F0B'
+        : syncStatus === 'offline' || syncStatus === 'error'
+          ? '#D13438'
+          : '#605E5C';
+    const statusIcon = syncStatus === 'online'
+      ? 'checkmark-circle'
+      : syncStatus === 'checking'
+        ? 'sync-circle'
+        : syncStatus === 'offline' || syncStatus === 'error'
+          ? 'cloud-offline'
+          : 'settings';
+
+    return (
+      <SafeAreaView style={styles.formSafe}>
+        <View style={styles.navBar}>
+          <TouchableOpacity onPress={() => setScreen('home')} style={styles.navBtn}>
+            <Ionicons name="arrow-back" size={24} color="#0078D4" />
+          </TouchableOpacity>
+          <Text style={styles.navTitle}>Sincronização</Text>
+          <TouchableOpacity onPress={() => refreshSyncState()} style={styles.navBtn}>
+            <Ionicons name="refresh-outline" size={22} color="#605E5C" />
+          </TouchableOpacity>
+        </View>
+
+        <ScrollView contentContainerStyle={styles.formScroll} keyboardShouldPersistTaps="handled">
+          <View style={styles.syncStatusCard}>
+            <View style={[styles.syncStatusIcon, { backgroundColor: `${statusColor}18` }]}>
+              <Ionicons name={statusIcon} size={28} color={statusColor} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={[styles.syncStatusTitle, { color: statusColor }]}>Notebook {syncStatus === 'online' ? 'conectado' : syncStatus === 'checking' ? 'verificando' : 'aguardando'}</Text>
+              <Text style={styles.syncStatusMessage}>{syncStatusMessage}</Text>
+            </View>
+          </View>
+
+          <View style={styles.syncMetricsRow}>
+            <View style={styles.syncMetricCard}>
+              <Text style={styles.syncMetricNumber}>{syncQueue.length}</Text>
+              <Text style={styles.syncMetricLabel}>PDFs pendentes</Text>
+            </View>
+            <View style={styles.syncMetricCard}>
+              <Text style={[styles.syncMetricNumber, { fontSize: 13 }]}>{syncLastAt ? new Date(syncLastAt).toLocaleDateString() : 'Nunca'}</Text>
+              <Text style={styles.syncMetricLabel}>Último envio</Text>
+            </View>
+          </View>
+
+          <View style={styles.formSection}>
+            <Text style={styles.fieldLabel}>Pareamento com o servidor</Text>
+            <Text style={styles.formFieldCaption}>Endereço HTTPS exibido no notebook</Text>
+            <TextInput
+              style={styles.formInput}
+              value={syncServerUrl}
+              onChangeText={setSyncServerUrl}
+              placeholder={DEFAULT_SYNC_SERVER_URL}
+              placeholderTextColor="#A19F9D"
+              autoCapitalize="none"
+              autoCorrect={false}
+              keyboardType="url"
+            />
+            <Text style={styles.formFieldCaption}>Código de pareamento</Text>
+            <TextInput
+              style={styles.formInput}
+              value={syncPairingToken}
+              onChangeText={setSyncPairingToken}
+              placeholder="Código mostrado no servidor Windows"
+              placeholderTextColor="#A19F9D"
+              autoCapitalize="characters"
+              autoCorrect={false}
+            />
+            <Text style={styles.selectionHint}>O Tailscale precisa aparecer como conectado no iPhone e no notebook. O PDF viaja pelo HTTPS privado e não fica armazenado em nuvem.</Text>
+            <TouchableOpacity
+              style={[styles.btnLogin, syncBusy && styles.disabledButton]}
+              onPress={handleSaveSyncConfiguration}
+              disabled={syncBusy}
+            >
+              <Text style={styles.btnLoginText}>{syncBusy ? 'Verificando...' : 'Salvar e testar conexão'}</Text>
+            </TouchableOpacity>
+          </View>
+
+          <TouchableOpacity
+            style={[styles.btnFinalize, { marginBottom: 16 }, syncBusy && styles.disabledButton]}
+            onPress={() => handleSync(true)}
+            disabled={syncBusy}
+          >
+            <Text style={styles.btnFinalizeText}>{syncBusy ? 'Sincronizando...' : 'Sincronizar agora'}</Text>
+          </TouchableOpacity>
+
+          {syncQueue.length > 0 && (
+            <View style={styles.formSection}>
+              <Text style={styles.fieldLabel}>Fila pendente</Text>
+              {syncQueue.map(item => (
+                <View key={item.id} style={styles.syncQueueItem}>
+                  <View style={styles.syncQueueIcon}><Ionicons name="document-text-outline" size={20} color="#0078D4" /></View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.syncQueueTitle} numberOfLines={1}>{item.fileName}</Text>
+                    <Text style={styles.syncQueueSubtitle}>{item.unit} · {item.type === 'recursos' ? 'Recursos' : 'Chamado'}</Text>
+                    {item.lastError ? <Text style={styles.syncQueueError} numberOfLines={2}>{item.lastError}</Text> : null}
+                  </View>
+                </View>
+              ))}
+            </View>
+          )}
+        </ScrollView>
+      </SafeAreaView>
+    );
+  }
+
   if (screen === 'home') {
     const totalOS = osHistory.length;
     const todayStr = new Date().toLocaleDateString();
@@ -1053,6 +1325,17 @@ export default function App() {
           </TouchableOpacity>
 
           <Text style={[styles.menuSectionTitle, { marginTop: 15 }]}>Sistema</Text>
+          <TouchableOpacity style={styles.menuBtn} onPress={() => { refreshSyncState(); setScreen('sync'); }}>
+            <View style={[styles.iconContainer, { backgroundColor: syncQueue.length > 0 ? '#FFF4CE' : '#E7F6E7' }]}>
+              <Ionicons name="sync-outline" size={22} color={syncQueue.length > 0 ? '#986F0B' : '#107C10'} />
+            </View>
+            <View style={styles.menuTextContainer}>
+              <Text style={styles.menuTitle}>Sincronização</Text>
+              <Text style={styles.menuDesc}>{syncQueue.length > 0 ? `${syncQueue.length} PDF(s) aguardando envio` : 'Enviar PDFs para o notebook'}</Text>
+            </View>
+            {syncQueue.length > 0 && <View style={styles.syncMenuBadge}><Text style={styles.syncMenuBadgeText}>{syncQueue.length}</Text></View>}
+            <Ionicons name="chevron-forward" size={18} color="#A19F9D" />
+          </TouchableOpacity>
           {trialDaysLeft >= 0 && (
             <TouchableOpacity style={styles.menuBtn} onPress={() => setActivationModalVisible(true)}>
               <View style={[styles.iconContainer, { backgroundColor: '#FFF4CE' }]}>
@@ -1090,7 +1373,7 @@ export default function App() {
             <Text style={styles.btnLogoutText}>Sair do Sistema</Text>
           </TouchableOpacity>
           <Text style={styles.copyrightText}>Controle de Chamados TI {'™'}</Text>
-              <Text style={styles.copyrightText}>{'©'} BzYuriDev - 2026</Text>
+          <Text style={styles.copyrightText}>{'©'} BzYuriDev - 2026</Text>
           <View style={{ height: 40 }} />
         </ScrollView>
 
@@ -1774,5 +2057,21 @@ const styles = StyleSheet.create({
   signedBtn: { backgroundColor: '#E7F6E7', borderColor: '#107C10' },
   signedBtnText: { color: '#107C10' },
   textArea: { minHeight: 110, textAlignVertical: 'top' },
-  emptyHint: { color: '#A19F9D', fontFamily: 'Poppins_400Regular', fontSize: 12, textAlign: 'center', paddingVertical: 10 }
+  emptyHint: { color: '#A19F9D', fontFamily: 'Poppins_400Regular', fontSize: 12, textAlign: 'center', paddingVertical: 10 },
+  disabledButton: { opacity: 0.55 },
+  syncStatusCard: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFFFFF', borderRadius: 10, borderWidth: 1, borderColor: '#E1DFDD', padding: 16, marginBottom: 12 },
+  syncStatusIcon: { width: 52, height: 52, borderRadius: 26, alignItems: 'center', justifyContent: 'center', marginRight: 13 },
+  syncStatusTitle: { fontFamily: 'Poppins_600SemiBold', fontSize: 14 },
+  syncStatusMessage: { color: '#605E5C', fontFamily: 'Poppins_400Regular', fontSize: 11, lineHeight: 17, marginTop: 2 },
+  syncMetricsRow: { flexDirection: 'row', gap: 10, marginBottom: 15 },
+  syncMetricCard: { flex: 1, minHeight: 82, backgroundColor: '#FFFFFF', borderRadius: 8, borderWidth: 1, borderColor: '#EDEBE9', alignItems: 'center', justifyContent: 'center', padding: 10 },
+  syncMetricNumber: { color: '#0078D4', fontFamily: 'Poppins_700Bold', fontSize: 24 },
+  syncMetricLabel: { color: '#605E5C', fontFamily: 'Poppins_400Regular', fontSize: 10, marginTop: 2 },
+  syncQueueItem: { flexDirection: 'row', alignItems: 'flex-start', paddingVertical: 11, borderBottomWidth: 1, borderBottomColor: '#EDEBE9' },
+  syncQueueIcon: { width: 36, height: 36, borderRadius: 18, backgroundColor: '#E5F3FF', alignItems: 'center', justifyContent: 'center', marginRight: 10 },
+  syncQueueTitle: { color: '#201F1E', fontFamily: 'Poppins_600SemiBold', fontSize: 12 },
+  syncQueueSubtitle: { color: '#605E5C', fontFamily: 'Poppins_400Regular', fontSize: 10, marginTop: 2 },
+  syncQueueError: { color: '#D13438', fontFamily: 'Poppins_400Regular', fontSize: 9, marginTop: 3 },
+  syncMenuBadge: { minWidth: 24, height: 24, borderRadius: 12, paddingHorizontal: 6, alignItems: 'center', justifyContent: 'center', backgroundColor: '#986F0B', marginRight: 8 },
+  syncMenuBadgeText: { color: '#FFFFFF', fontFamily: 'Poppins_600SemiBold', fontSize: 10 }
 });
