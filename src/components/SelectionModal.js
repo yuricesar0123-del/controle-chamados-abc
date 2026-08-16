@@ -16,6 +16,7 @@ export default function SelectionModal({
   getKey = item => String(item),
   getIcon = () => 'list-outline',
   isSelected = (item, value) => getLabel(item) === value,
+  multiple = false,
 }) {
   const [query, setQuery] = useState('');
 
@@ -37,7 +38,11 @@ export default function SelectionModal({
             <Ionicons name="arrow-back" size={24} color="#0078D4" />
           </TouchableOpacity>
           <Text style={styles.title}>{title}</Text>
-          <View style={styles.headerButton} />
+          {multiple ? (
+            <TouchableOpacity onPress={onClose} style={styles.headerButton} accessibilityLabel="Concluir seleção">
+              <Ionicons name="checkmark" size={25} color="#107C10" />
+            </TouchableOpacity>
+          ) : <View style={styles.headerButton} />}
         </View>
 
         {searchable && (
@@ -56,6 +61,12 @@ export default function SelectionModal({
               </TouchableOpacity>
             )}
           </View>
+        )}
+
+        {multiple && (
+          <Text style={styles.counter}>
+            {Array.isArray(selectedValue) ? selectedValue.length : 0} selecionado(s)
+          </Text>
         )}
 
         <FlatList
@@ -85,6 +96,7 @@ const styles = StyleSheet.create({
   title: { fontSize: 16, fontFamily: 'Poppins_600SemiBold', color: '#201F1E' },
   searchBox: { flexDirection: 'row', alignItems: 'center', margin: 16, marginBottom: 8, paddingHorizontal: 13, height: 48, backgroundColor: '#FFFFFF', borderRadius: 8, borderWidth: 1, borderColor: '#D1D1D1' },
   searchInput: { flex: 1, marginLeft: 9, color: '#201F1E', fontFamily: 'Poppins_400Regular', fontSize: 14 },
+  counter: { color: '#005A9E', fontFamily: 'Poppins_600SemiBold', fontSize: 12, marginHorizontal: 20, marginTop: 8 },
   list: { padding: 16, paddingBottom: 32 },
   option: { minHeight: 54, backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#E1DFDD', borderRadius: 8, marginBottom: 9, paddingHorizontal: 14, flexDirection: 'row', alignItems: 'center' },
   optionSelected: { backgroundColor: '#EDF8F0', borderColor: '#86C98F' },

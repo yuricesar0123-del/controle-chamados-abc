@@ -2,7 +2,7 @@
   "expo": {
     "name": "Chamados ABC",
     "slug": "controle-chamados-abc",
-    "version": "1.0.2",
+    "version": "1.0.3",
     "jsEngine": "hermes",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -13,17 +13,17 @@
       "backgroundColor": "#F3F2F1"
     },
     "android": {
-      "versionCode": 2,
+      "versionCode": 3,
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#F3F2F1"
       },
       "package": "com.yuricesar.controlechamadosabc",
-      "runtimeVersion": "1.0.2"
+      "runtimeVersion": "1.0.3"
     },
     "ios": {
       "bundleIdentifier": "com.yuricesar.controlechamadosabc",
-      "buildNumber": "2",
+      "buildNumber": "3",
       "supportsTablet": true,
       "runtimeVersion": {
         "policy": "appVersion"

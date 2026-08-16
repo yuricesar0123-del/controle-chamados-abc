@@ -1,7 +1,18 @@
-export const EMPRESA_NOME = 'CONTROLE DE CHAMADOS ABC';
+export const EMPRESA_NOME = 'CHECKLIST VISITA LOJA';
 
 export const EQUIPAMENTOS_MANUTENCAO = {
   'PDV e atendimento': [
+    'Pré-venda',
+    'Relógio de Ponto',
+    'Self-checkout',
+    'Self-pagamento',
+    'Comanda',
+    'Devolução',
+    'Estação de Trabalho',
+    'Impressora de Setor',
+    'PDV',
+    'PDV Touch',
+    'Vasilhame',
     'Computador (CPU/Mini PC)',
     'Monitor',
     'Teclado PDV Smak',
@@ -12,10 +23,13 @@ export const EQUIPAMENTOS_MANUTENCAO = {
     'Leitor de Código de Barras Omnidirecional',
     'Leitor de QRCode / Câmera Biométrica',
     'Impressora ECF Térmica ELgin I9',
-    'Pin Pad',
+    'SSD',
+    'Fonte de Alimentação',
+    'PinPad',
     'Gaveta de Dinheiro'
   ],
   'Rede e energia': [
+    'Access Point',
     'Nobreak',
     'Transformador 220p/110',
     'Filtro de Linha',
@@ -25,10 +39,18 @@ export const EQUIPAMENTOS_MANUTENCAO = {
     'Cabo de Rede RJ45 Cat6'
   ],
   'Operação e infraestrutura': [
+    'A Classificar',
+    'Balança de Retaguarda',
+    'Cancela de Estacionamento',
     'Coletor',
+    'Painéis',
+    'Terminal de Consulta',
     'Terminal de Consulta Gertec',
+    'Balança de PDV',
     'Balança Urano',
-    'Balança Toledo'
+    'Balança Toledo',
+    'KIT CPU PDV',
+    'CPU de PDV Completa'
   ],
   Segurança: [
     'Configuração do Link CFTV',
