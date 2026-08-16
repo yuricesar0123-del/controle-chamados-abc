@@ -1,0 +1,7 @@
+cd "C:\PROGRAMACAO TUDO\Programa do ABC\ControleChamadosABC"
+git add assets/icon.png
+git commit -m "Atualiza icone do aplicativo"
+git push
+
+App.js, textos, cores, telas ou imagens usadas dentro do app,
+npx eas-cli@latest update --channel production --message "Descricao da alteracao"
